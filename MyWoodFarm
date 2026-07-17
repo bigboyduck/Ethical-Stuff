@@ -1,0 +1,135 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- UI Construction
+local screenGui = Instance.new("ScreenGui", game.CoreGui)
+local mainFrame = Instance.new("Frame", screenGui)
+mainFrame.Size = UDim2.new(0, 260, 0, 180)
+mainFrame.Position = UDim2.new(0.5, -130, 0.5, -90)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
+
+local corner = Instance.new("UICorner", mainFrame)
+corner.CornerRadius = UDim.new(0, 12)
+
+local stroke = Instance.new("UIStroke", mainFrame)
+stroke.Color = Color3.fromRGB(60, 60, 60)
+stroke.Thickness = 2
+
+local gradient = Instance.new("UIGradient", mainFrame)
+gradient.Rotation = 45
+gradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 30)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(45, 45, 45))
+})
+
+local title = Instance.new("TextLabel", mainFrame)
+title.Size = UDim2.new(1, 0, 0.2, 0)
+title.Text = "Automation Pro"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.BackgroundTransparency = 1
+
+local statusLabel = Instance.new("TextLabel", mainFrame)
+statusLabel.Size = UDim2.new(1, 0, 0.15, 0)
+statusLabel.Position = UDim2.new(0, 0, 0.2, 0)
+statusLabel.Text = "Status: Idle"
+statusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+statusLabel.BackgroundTransparency = 1
+
+local function createButton(text, pos, color)
+    local btn = Instance.new("TextButton", mainFrame)
+    btn.Size = UDim2.new(0.8, 0, 0.2, 0)
+    btn.Position = pos
+    btn.Text = text
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.BackgroundColor3 = color
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    return btn
+end
+
+local toggleBtn = createButton("Start Automation", UDim2.new(0.1, 0, 0.4, 0), Color3.fromRGB(40, 150, 40))
+local uninjectBtn = createButton("Uninject", UDim2.new(0.1, 0, 0.65, 0), Color3.fromRGB(150, 40, 40))
+
+-- UI Toggle Keybind (Left Control)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.LeftControl then
+        mainFrame.Visible = not mainFrame.Visible
+    end
+end)
+
+-- (Keep the original logic below)
+_G.Running = false
+_G.MyPlot = nil
+
+local function findMyPlot()
+    local plotsFolder = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Plots")
+    if not plotsFolder then return nil end
+    for _, plot in pairs(plotsFolder:GetChildren()) do
+        local anchor = plot:FindFirstChild("NameTagAnchor")
+        if anchor then
+            local ownerTag = anchor:FindFirstChild("OwnerTag")
+            if ownerTag then
+                local nameObj = ownerTag:FindFirstChild("Name")
+                if nameObj then
+                    local ownerName = (nameObj:IsA("TextLabel") and nameObj.Text) or (nameObj:IsA("StringValue") and nameObj.Value)
+                    if ownerName == player.Name then return plot end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function firePrompt(part)
+    if not part then return end
+    for _, descendant in pairs(part:GetDescendants()) do
+        if descendant:IsA("ProximityPrompt") then
+            fireproximityprompt(descendant)
+            return true
+        end
+    end
+    return false
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+    _G.Running = not _G.Running
+    toggleBtn.Text = _G.Running and "Stop" or "Start Automation"
+    statusLabel.Text = _G.Running and "Status: Running" or "Status: Idle"
+    if _G.Running then _G.MyPlot = findMyPlot() end
+end)
+
+uninjectBtn.MouseButton1Click:Connect(function()
+    _G.Running = false
+    screenGui:Destroy()
+end)
+
+task.spawn(function()
+    while task.wait(2) do
+        if _G.Running and _G.MyPlot then
+            local utility = _G.MyPlot:FindFirstChild("Utility")
+            if utility then
+                local woodHolder = utility:FindFirstChild("WoodHolder")
+                local woodChipper = utility:FindFirstChild("WoodChipper")
+                if woodHolder and woodChipper then
+                    rootPart.CFrame = woodHolder:GetPivot() + Vector3.new(0, 0, 3)
+                    task.wait(0.3)
+                    firePrompt(woodHolder)
+                    task.wait(2)
+                    rootPart.CFrame = woodChipper:GetPivot() + Vector3.new(0, 0, 3)
+                    task.wait(0.3)
+                    firePrompt(woodChipper)
+                    task.wait(2)
+                end
+            end
+        end
+    end
+end)
