@@ -1,0 +1,659 @@
+local Config = {
+    AutoPurchase = true,
+    ObbyFarm = true,
+    CrateFarm = true,
+    AutoRebirth = true,
+    OpenDoors = true,
+    AutoBlender = true,
+    PurchaseTimer = 1
+}
+
+-- Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- Locals/Assets
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+local Event = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Event")
+local FactoryComp = Event:WaitForChild("Factory Components")
+local Rebirths = LocalPlayer:WaitForChild("leaderstats"):WaitForChild("Rebirths")
+local Crates = Workspace:WaitForChild("RandomCrateDropsFolder")
+local Tycoons = Workspace:WaitForChild("Tycoons")
+local ClaimedPlot = LocalPlayer:WaitForChild("Values"):WaitForChild("ClaimedPlot")
+local OwnedTycoon, TycoonFound = nil, false
+local IsRunning = true
+local LastPurchaseTime = 0
+local LastRebirthTime = 0
+local LastBlenderTime = 0
+local LastDoorTime = 0
+local LastObbyTime = 0
+local LastCrateTime = 0
+
+-- Obby Stuff
+local Obbies = Workspace:WaitForChild("Obbies")
+local ObbyData = {
+    {Obbies:WaitForChild("EasyObby"), 0},
+    {Obbies:WaitForChild("HardObby"), 0},
+    {Obbies:WaitForChild("GravityTowerObby"), 21},
+    {Obbies:WaitForChild("IceCavernObby"), 41},
+    {Obbies:WaitForChild("VolcanoObby"), 81}
+}
+
+-- Remotes
+local BuyRemote = Event:WaitForChild("PurchaseButton")
+local RebirthRemote = FactoryComp:WaitForChild("S_Rebirth")
+
+-- Cache for frequently accessed objects
+local CachedTycoon = nil
+local CachedPurchaseButtons = {}
+local CachedUpgradeButtons = {}
+local CachedRebirthButtons = {}
+local CachedBlenders = {}
+local CachedDoors = {}
+local CachedPackagers = {}
+local CachedCrates = {}
+local LastCacheUpdate = 0
+
+-- UI Creation
+local function CreateUI()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "FarmUI"
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    
+    -- Main Frame - Modern rounded design
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 320, 0, 420)
+    MainFrame.Position = UDim2.new(0, 10, 0.5, -210)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    MainFrame.BackgroundTransparency = 0.05
+    MainFrame.BorderSizePixel = 0
+    MainFrame.ClipsDescendants = true
+    MainFrame.Parent = ScreenGui
+    
+    -- Corner rounding
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 12)
+    Corner.Parent = MainFrame
+    
+    -- Shadow effect
+    local Shadow = Instance.new("Frame")
+    Shadow.Size = UDim2.new(1, 0, 1, 0)
+    Shadow.Position = UDim2.new(0, 0, 0, 0)
+    Shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    Shadow.BackgroundTransparency = 0.8
+    Shadow.BorderSizePixel = 0
+    Shadow.Parent = MainFrame
+    
+    -- Drag functionality
+    local dragging, dragInput, dragStart, startPos
+    
+    MainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    MainFrame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    
+    -- Title bar with gradient
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 45)
+    TitleBar.Position = UDim2.new(0, 0, 0, 0)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+    
+    local TitleCorner = Instance.new("UICorner")
+    TitleCorner.CornerRadius = UDim.new(0, 12)
+    TitleCorner.Parent = TitleBar
+    
+    -- Title
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(0.7, 0, 1, 0)
+    Title.Position = UDim2.new(0, 15, 0, 0)
+    Title.BackgroundTransparency = 1
+    Title.Text = "⚡ Auto Farm"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextSize = 18
+    Title.Font = Enum.Font.GothamBold
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Parent = TitleBar
+    
+    -- Close/Hide Button
+    local HideButton = Instance.new("TextButton")
+    HideButton.Size = UDim2.new(0, 35, 0, 35)
+    HideButton.Position = UDim2.new(1, -45, 0, 5)
+    HideButton.BackgroundTransparency = 1
+    HideButton.Text = "−"
+    HideButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    HideButton.TextSize = 24
+    HideButton.Font = Enum.Font.GothamBold
+    HideButton.Parent = TitleBar
+    
+    HideButton.MouseButton1Click:Connect(function()
+        MainFrame.Visible = not MainFrame.Visible
+    end)
+    
+    -- Scrolling Frame
+    local ScrollingFrame = Instance.new("ScrollingFrame")
+    ScrollingFrame.Size = UDim2.new(1, -20, 1, -100)
+    ScrollingFrame.Position = UDim2.new(0, 10, 0, 55)
+    ScrollingFrame.BackgroundTransparency = 1
+    ScrollingFrame.ScrollBarThickness = 6
+    ScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(60, 60, 80)
+    ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 420)
+    ScrollingFrame.Parent = MainFrame
+    
+    local CanvasLayout = Instance.new("UIListLayout")
+    CanvasLayout.Padding = UDim.new(0, 8)
+    CanvasLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    CanvasLayout.Parent = ScrollingFrame
+    
+    -- Modern Toggle
+    local function CreateToggle(parent, labelText, configKey, icon)
+        local ToggleFrame = Instance.new("Frame")
+        ToggleFrame.Size = UDim2.new(1, 0, 0, 40)
+        ToggleFrame.BackgroundTransparency = 1
+        ToggleFrame.Parent = parent
+        
+        -- Hover effect
+        local Hover = Instance.new("Frame")
+        Hover.Size = UDim2.new(1, 0, 1, 0)
+        Hover.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        Hover.BackgroundTransparency = 0.95
+        Hover.BorderSizePixel = 0
+        Hover.Parent = ToggleFrame
+        
+        local HoverCorner = Instance.new("UICorner")
+        HoverCorner.CornerRadius = UDim.new(0, 6)
+        HoverCorner.Parent = Hover
+        
+        local Label = Instance.new("TextLabel")
+        Label.Size = UDim2.new(0.6, 0, 1, 0)
+        Label.Position = UDim2.new(0, 15, 0, 0)
+        Label.BackgroundTransparency = 1
+        Label.Text = icon and icon .. " " .. labelText or labelText
+        Label.TextColor3 = Color3.fromRGB(220, 220, 230)
+        Label.TextSize = 15
+        Label.Font = Enum.Font.GothamSemibold
+        Label.TextXAlignment = Enum.TextXAlignment.Left
+        Label.Parent = ToggleFrame
+        
+        local ToggleButton = Instance.new("TextButton")
+        ToggleButton.Size = UDim2.new(0, 55, 0, 28)
+        ToggleButton.Position = UDim2.new(1, -65, 0.5, -14)
+        ToggleButton.BackgroundColor3 = Config[configKey] and Color3.fromRGB(0, 200, 80) or Color3.fromRGB(200, 50, 50)
+        ToggleButton.Text = Config[configKey] and "ON" or "OFF"
+        ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleButton.TextSize = 13
+        ToggleButton.Font = Enum.Font.GothamBold
+        ToggleButton.BorderSizePixel = 0
+        ToggleButton.Parent = ToggleFrame
+        
+        local ToggleCorner = Instance.new("UICorner")
+        ToggleCorner.CornerRadius = UDim.new(0, 14)
+        ToggleCorner.Parent = ToggleButton
+        
+        ToggleButton.MouseButton1Click:Connect(function()
+            Config[configKey] = not Config[configKey]
+            ToggleButton.BackgroundColor3 = Config[configKey] and Color3.fromRGB(0, 200, 80) or Color3.fromRGB(200, 50, 50)
+            ToggleButton.Text = Config[configKey] and "ON" or "OFF"
+        end)
+        
+        -- Hover effects
+        ToggleButton.MouseEnter:Connect(function()
+            ToggleButton.BackgroundTransparency = 0.1
+        end)
+        ToggleButton.MouseLeave:Connect(function()
+            ToggleButton.BackgroundTransparency = 0
+        end)
+    end
+    
+    -- Modern Slider
+    local function CreateSlider(parent, labelText, configKey, min, max, decimal)
+        local SliderFrame = Instance.new("Frame")
+        SliderFrame.Size = UDim2.new(1, 0, 0, 50)
+        SliderFrame.BackgroundTransparency = 1
+        SliderFrame.Parent = parent
+        
+        local Label = Instance.new("TextLabel")
+        Label.Size = UDim2.new(0.5, 0, 0.4, 0)
+        Label.Position = UDim2.new(0, 15, 0, 0)
+        Label.BackgroundTransparency = 1
+        Label.Text = labelText
+        Label.TextColor3 = Color3.fromRGB(220, 220, 230)
+        Label.TextSize = 15
+        Label.Font = Enum.Font.GothamSemibold
+        Label.TextXAlignment = Enum.TextXAlignment.Left
+        Label.Parent = SliderFrame
+        
+        local ValueLabel = Instance.new("TextLabel")
+        ValueLabel.Size = UDim2.new(0.4, 0, 0.4, 0)
+        ValueLabel.Position = UDim2.new(0.6, 0, 0, 0)
+        ValueLabel.BackgroundTransparency = 1
+        ValueLabel.Text = string.format("%.1fs", Config[configKey])
+        ValueLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+        ValueLabel.TextSize = 15
+        ValueLabel.Font = Enum.Font.GothamBold
+        ValueLabel.TextXAlignment = Enum.TextXAlignment.Right
+        ValueLabel.Parent = SliderFrame
+        
+        local SliderTrack = Instance.new("Frame")
+        SliderTrack.Size = UDim2.new(1, -30, 0, 4)
+        SliderTrack.Position = UDim2.new(0, 15, 0.7, 0)
+        SliderTrack.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+        SliderTrack.BorderSizePixel = 0
+        SliderTrack.Parent = SliderFrame
+        
+        local TrackCorner = Instance.new("UICorner")
+        TrackCorner.CornerRadius = UDim.new(0, 2)
+        TrackCorner.Parent = SliderTrack
+        
+        local SliderFill = Instance.new("Frame")
+        local percent = (Config[configKey] - min) / (max - min)
+        SliderFill.Size = UDim2.new(percent, 0, 1, 0)
+        SliderFill.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+        SliderFill.BorderSizePixel = 0
+        SliderFill.Parent = SliderTrack
+        
+        local FillCorner = Instance.new("UICorner")
+        FillCorner.CornerRadius = UDim.new(0, 2)
+        FillCorner.Parent = SliderFill
+        
+        local SliderButton = Instance.new("TextButton")
+        SliderButton.Size = UDim2.new(0, 18, 0, 18)
+        SliderButton.Position = UDim2.new(percent, -9, 0.5, -9)
+        SliderButton.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
+        SliderButton.Text = ""
+        SliderButton.BorderSizePixel = 0
+        SliderButton.Parent = SliderTrack
+        
+        local ButtonCorner = Instance.new("UICorner")
+        ButtonCorner.CornerRadius = UDim.new(1, 0)
+        ButtonCorner.Parent = SliderButton
+        
+        -- Shadow on button
+        local ButtonShadow = Instance.new("Frame")
+        ButtonShadow.Size = UDim2.new(1, 0, 1, 0)
+        ButtonShadow.Position = UDim2.new(0, 0, 0, 0)
+        ButtonShadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        ButtonShadow.BackgroundTransparency = 0.3
+        ButtonShadow.BorderSizePixel = 0
+        ButtonShadow.Parent = SliderButton
+        
+        local ShadowCorner = Instance.new("UICorner")
+        ShadowCorner.CornerRadius = UDim.new(1, 0)
+        ShadowCorner.Parent = ButtonShadow
+        
+        local dragging = false
+        
+        SliderButton.MouseButton1Down:Connect(function()
+            dragging = true
+        end)
+        
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+        
+        local function UpdateSlider(mouseX)
+            if dragging then
+                local sliderPos = SliderTrack.AbsolutePosition
+                local sliderWidth = SliderTrack.AbsoluteSize.X
+                local percent = math.clamp((mouseX - sliderPos.X) / sliderWidth, 0, 1)
+                local value = min + (max - min) * percent
+                if decimal then
+                    value = math.round(value * 10) / 10
+                else
+                    value = math.round(value)
+                end
+                Config[configKey] = value
+                SliderFill.Size = UDim2.new(percent, 0, 1, 0)
+                SliderButton.Position = UDim2.new(percent, -9, 0.5, -9)
+                ValueLabel.Text = string.format("%.1fs", value)
+            end
+        end
+        
+        SliderButton.MouseMoved:Connect(function()
+            local mousePos = UserInputService:GetMouseLocation()
+            UpdateSlider(mousePos.X)
+        end)
+        
+        SliderTrack.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                local mousePos = UserInputService:GetMouseLocation()
+                UpdateSlider(mousePos.X)
+            end
+        end)
+    end
+    
+    -- Create all toggles with icons
+    CreateToggle(ScrollingFrame, "Auto Purchase", "AutoPurchase", "🛒")
+    CreateToggle(ScrollingFrame, "Obby Farm", "ObbyFarm", "🏃")
+    CreateToggle(ScrollingFrame, "Crate Farm", "CrateFarm", "📦")
+    CreateToggle(ScrollingFrame, "Auto Rebirth", "AutoRebirth", "🔄")
+    CreateToggle(ScrollingFrame, "Open Doors", "OpenDoors", "🚪")
+    CreateToggle(ScrollingFrame, "Auto Blender", "AutoBlender", "🌀")
+    
+    -- Create slider
+    CreateSlider(ScrollingFrame, "Purchase Delay", "PurchaseTimer", 0.1, 5, true)
+    
+    -- Uninject Button
+    local UninjectFrame = Instance.new("Frame")
+    UninjectFrame.Size = UDim2.new(1, -20, 0, 45)
+    UninjectFrame.Position = UDim2.new(0, 10, 1, -50)
+    UninjectFrame.BackgroundTransparency = 1
+    UninjectFrame.Parent = MainFrame
+    
+    local UninjectButton = Instance.new("TextButton")
+    UninjectButton.Size = UDim2.new(1, 0, 1, 0)
+    UninjectButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    UninjectButton.Text = "⛔ Uninject"
+    UninjectButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    UninjectButton.TextSize = 16
+    UninjectButton.Font = Enum.Font.GothamBold
+    UninjectButton.BorderSizePixel = 0
+    UninjectButton.Parent = UninjectFrame
+    
+    local UninjectCorner = Instance.new("UICorner")
+    UninjectCorner.CornerRadius = UDim.new(0, 8)
+    UninjectCorner.Parent = UninjectButton
+    
+    UninjectButton.MouseEnter:Connect(function()
+        UninjectButton.BackgroundColor3 = Color3.fromRGB(220, 30, 30)
+    end)
+    UninjectButton.MouseLeave:Connect(function()
+        UninjectButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    end)
+    
+    UninjectButton.MouseButton1Click:Connect(function()
+        IsRunning = false
+        ScreenGui:Destroy()
+        print("Script uninjected successfully!")
+    end)
+    
+    -- Left Ctrl to toggle UI
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.LeftControl then
+            MainFrame.Visible = not MainFrame.Visible
+        end
+    end)
+    
+    return ScreenGui
+end
+
+-- Optimized cache update
+local function UpdateCache()
+    local currentTime = tick()
+    if currentTime - LastCacheUpdate < 5 and CachedTycoon then return end
+    
+    LastCacheUpdate = currentTime
+    
+    if not TycoonFound or not OwnedTycoon then return end
+    
+    CachedTycoon = Tycoons[OwnedTycoon]
+    if not CachedTycoon then return end
+    
+    -- Cache purchase buttons
+    CachedPurchaseButtons = {}
+    CachedUpgradeButtons = {}
+    CachedRebirthButtons = {}
+    CachedBlenders = {}
+    CachedDoors = {}
+    CachedPackagers = {}
+    
+    -- Purchase buttons
+    for _, container in pairs({"PurchaseButtons", "UpgradeButtons"}) do
+        if CachedTycoon[container] then
+            for _, v in pairs(CachedTycoon[container]:GetDescendants()) do
+                if v:IsA("TextLabel") and v.Name == "Price" then
+                    local button = container == "PurchaseButtons" and CachedPurchaseButtons or CachedUpgradeButtons
+                    table.insert(button, v)
+                end
+            end
+        end
+    end
+    
+    -- Rebirth buttons
+    if CachedTycoon.RebirthButtons then
+        for _, v in pairs(CachedTycoon.RebirthButtons:GetDescendants()) do
+            if v:IsA("TextLabel") and v.Name == "Price" then
+                table.insert(CachedRebirthButtons, v)
+            end
+        end
+    end
+    
+    -- Blenders
+    if CachedTycoon.Purchases then
+        for _, v in pairs(CachedTycoon.Purchases:GetDescendants()) do
+            if v.Name == "ActivationLight" then
+                table.insert(CachedBlenders, v)
+            end
+        end
+    end
+    
+    -- Doors
+    if CachedTycoon.ProcessingMachines then
+        for _, v in pairs(CachedTycoon.ProcessingMachines:GetDescendants()) do
+            if v:IsA("Model") and string.find(v.Name, "JarFactory") then
+                for _, button in pairs(v:GetDescendants()) do
+                    if button:IsA("ProximityPrompt") and button.Name == "OpenDoorPrompt" then
+                        table.insert(CachedDoors, button)
+                    end
+                end
+            elseif v:IsA("Model") and string.find(v.Name, "JarPackager") then
+                for _, arrow in pairs(v:GetDescendants()) do
+                    if arrow:IsA("BillboardGui") and arrow.Name == "Arrow" then
+                        for _, prompt in pairs(arrow.Parent.Parent:GetDescendants()) do
+                            if prompt:IsA("ProximityPrompt") and prompt.Name == "OpenDoorPrompt" then
+                                table.insert(CachedPackagers, prompt)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Crates
+    CachedCrates = {}
+    for _, v in pairs(Crates:GetDescendants()) do
+        if v:IsA("TouchTransmitter") then
+            table.insert(CachedCrates, v)
+        end
+    end
+end
+
+-- Optimized functions using cached data
+local function PurchaseItems()
+    local currentTime = tick()
+    if currentTime - LastPurchaseTime < Config.PurchaseTimer then return end
+    
+    LastPurchaseTime = currentTime
+    
+    for _, button in ipairs(CachedPurchaseButtons) do
+        if button.TextColor3 == Color3.fromRGB(114, 255, 112) then
+            local buttonBase = button.Parent.Parent.Parent.ButtonBase
+            if buttonBase then
+                BuyRemote:FireServer(buttonBase.Parent.Name)
+                return
+            end
+        end
+    end
+    
+    for _, button in ipairs(CachedUpgradeButtons) do
+        if button.TextColor3 == Color3.fromRGB(114, 255, 112) then
+            local buttonBase = button.Parent.Parent.Parent.ButtonBase
+            if buttonBase then
+                BuyRemote:FireServer(buttonBase.Parent.Name)
+                return
+            end
+        end
+    end
+end
+
+local function Rebirth()
+    local currentTime = tick()
+    if currentTime - LastRebirthTime < 2 then return end
+    
+    for _, button in ipairs(CachedRebirthButtons) do
+        if button.TextColor3 == Color3.fromRGB(114, 255, 112) then
+            LastRebirthTime = currentTime
+            RebirthRemote:FireServer()
+            return
+        end
+    end
+end
+
+local function ActivateBlenders()
+    local currentTime = tick()
+    if currentTime - LastBlenderTime < 1 then return end
+    
+    for _, light in ipairs(CachedBlenders) do
+        if light.Color == Color3.fromRGB(0, 255, 0) then
+            local button = light.Parent.Button
+            if button and button.Attachment and button.Attachment.ActivateBlender then
+                LastBlenderTime = currentTime
+                fireproximityprompt(button.Attachment.ActivateBlender)
+                return
+            end
+        end
+    end
+end
+
+local function OpenDoors()
+    local currentTime = tick()
+    if currentTime - LastDoorTime < 0.5 then return end
+    
+    for _, prompt in ipairs(CachedDoors) do
+        if prompt.Enabled then
+            LastDoorTime = currentTime
+            fireproximityprompt(prompt)
+            return
+        end
+    end
+    
+    for _, prompt in ipairs(CachedPackagers) do
+        if prompt.Enabled then
+            LastDoorTime = currentTime
+            fireproximityprompt(prompt)
+            return
+        end
+    end
+end
+
+local function FarmObbies()
+    local currentTime = tick()
+    if currentTime - LastObbyTime < 0.3 then return end
+    
+    for _, data in ipairs(ObbyData) do
+        local obby, rebirthReq = data[1], data[2]
+        local finish = obby:FindFirstChild("Finish")
+        local decorations = obby:FindFirstChild("Decorations")
+        
+        if finish and finish:FindFirstChild("Button") and decorations then
+            local obbySign = decorations:FindFirstChild("ObbySign")
+            local border = obbySign and obbySign:FindFirstChild("Border")
+            
+            if border and not border.CanCollide and Rebirths.Value >= rebirthReq then
+                LastObbyTime = currentTime
+                local OldPos = HumanoidRootPart.CFrame
+                firetouchinterest(finish.Button, HumanoidRootPart, 0)
+                firetouchinterest(finish.Button, HumanoidRootPart, 1)
+                task.wait(0.4)
+                HumanoidRootPart.CFrame = OldPos
+                return
+            end
+        end
+    end
+end
+
+local function FarmCrates()
+    local currentTime = tick()
+    if currentTime - LastCrateTime < 0.1 then return end
+    
+    for _, transmitter in ipairs(CachedCrates) do
+        if transmitter.Parent then
+            LastCrateTime = currentTime
+            firetouchinterest(transmitter.Parent, HumanoidRootPart, 0)
+            firetouchinterest(transmitter.Parent, HumanoidRootPart, 1)
+            return
+        end
+    end
+end
+
+-- Functions
+local function OnCharacterAdded(NewCharacter)
+    Character = NewCharacter
+    HumanoidRootPart = NewCharacter:WaitForChild("HumanoidRootPart")
+end
+
+local function CheckTycoonOwnership()
+    for _, v in pairs(Tycoons:GetDescendants()) do
+        if v:IsA("ObjectValue") and v.Name == "Owner" and v.Value == LocalPlayer then
+            OwnedTycoon, TycoonFound = v.Parent.Name, true
+            UpdateCache()
+            break
+        end
+    end
+end
+
+-- Create UI
+CreateUI()
+
+-- Connections
+LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+if ClaimedPlot.Value then CheckTycoonOwnership() end
+ClaimedPlot:GetPropertyChangedSignal("Value"):Connect(function()
+    if ClaimedPlot.Value then
+        task.wait(1)
+        CheckTycoonOwnership()
+    end
+end)
+
+-- Main Loop with cooldowns and caching
+while IsRunning do
+    task.wait(0.1) -- Reduce loop frequency
+    
+    if TycoonFound then
+        -- Update cache periodically
+        UpdateCache()
+        
+        if Config.AutoPurchase then PurchaseItems() end
+        if Config.AutoRebirth then Rebirth() end
+        if Config.AutoBlender then ActivateBlenders() end
+        if Config.OpenDoors then OpenDoors() end
+    end
+    
+    if Config.ObbyFarm and HumanoidRootPart then FarmObbies() end
+    if Config.CrateFarm and HumanoidRootPart then FarmCrates() end
+end
