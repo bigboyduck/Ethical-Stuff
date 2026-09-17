@@ -8,7 +8,7 @@ local player = Players.LocalPlayer
 local appliedCars = {} -- remembers which cars already have the effect
 
 --------------------------------------------------------------------------------
--- 1. SET ROLEPLAY INFO AUTOMATICALLY ON EXECUTION
+-- 1. SET ROLEPLAY INFO AUTOMATICALLY ON EXECUTION (USES PLAYER'S ACTUAL NAME)
 --------------------------------------------------------------------------------
 local roleplayArgs = {
     {
@@ -17,7 +17,7 @@ local roleplayArgs = {
         EyeColor = "Green",
         HeightFeet = 5,
         Age = "Kid",
-        Name = player.Name,
+        Name = player.Name, -- Dynamically fetches their actual Roblox Username
         Weight = 187,
         HeightInches = 2,
         License = "Active",
@@ -29,7 +29,7 @@ task.spawn(function()
     local changeRPInfoRemote = ReplicatedStorage:WaitForChild("FE", 10):WaitForChild("ChangeRoleplayInfo", 10)
     if changeRPInfoRemote then
         changeRPInfoRemote:InvokeServer(unpack(roleplayArgs))
-        print("✅ Roleplay info updated (Grey Hair & Kid Age).")
+        print("✅ Roleplay info updated for " .. player.Name .. " (Grey Hair & Kid Age).")
     else
         warn("❌ Could not find ChangeRoleplayInfo RemoteFunction.")
     end
@@ -159,23 +159,20 @@ local function applyToCar(car)
     local wheels = car:FindFirstChild("Wheels")
 
     if body then
-        -- Specific bumper additions
         addRainbow(body:FindFirstChild("RightBumper"))
         addRainbow(body:FindFirstChild("LeftBumper"))
 
-        -- Specific index additions (e.g., child 8 and child 26)
         local children = body:GetChildren()
         if children[8] then addRainbow(children[8]) end
         if children[26] then addRainbow(children[26]) end
 
-        -- Loop through whole Body to turn EVERYTHING named "COLOR" into Rainbow
+        -- Scans all body descendants and turns parts named "COLOR" rainbow
         for _, child in ipairs(body:GetDescendants()) do
             if child.Name == "COLOR" and child:IsA("BasePart") then
                 addRainbow(child)
             end
         end
 
-        -- Bumper Particles
         addParticles(body:FindFirstChild("LeftBumper"))
         addParticles(body:FindFirstChild("RightBumper"))
     end
@@ -185,17 +182,16 @@ local function applyToCar(car)
         addParticles(wheels:FindFirstChild("RR"))
     end
 
-    print("✅ Rainbow & Sparkle applied to:", car.Name)
+    print("✅ Rainbow & Sparkle applied to car:", car.Name)
 end
 
 --------------------------------------------------------------------------------
--- 3. IMPROVED DETECTION SYSTEM FOR OTHER SCRIPT USERS
+-- 3. DETECTION SYSTEM FOR SCRIPT USERS
 --------------------------------------------------------------------------------
 local function isScriptUser(targetPlayer)
     if not targetPlayer then return false end
     if targetPlayer == player then return true end
 
-    -- Helper to read string value or attribute
     local function getValue(container, key)
         if not container then return nil end
         local child = container:FindFirstChild(key)
@@ -208,7 +204,6 @@ local function isScriptUser(targetPlayer)
         return nil
     end
 
-    -- Check RoleplayInfo directly inside player or character
     local rpInfo = targetPlayer:FindFirstChild("RoleplayInfo") or (targetPlayer.Character and targetPlayer.Character:FindFirstChild("RoleplayInfo"))
     if rpInfo then
         local hair = getValue(rpInfo, "HairColor")
@@ -226,25 +221,13 @@ local function isScriptUser(targetPlayer)
     return false
 end
 
-local function getCarFromAncestor(instance)
-    local current = instance
-    while current and current ~= workspace do
-        if current.Parent == workspace:FindFirstChild("Vehicles") then
-            return current
-        end
-        current = current.Parent
-    end
-    return nil
-end
-
--- Scans all vehicles and checks their seats & occupants
+-- Detects seats and updates cars for anyone running the Grey/Kid script
 RunService.Heartbeat:Connect(function()
     local vehiclesFolder = workspace:FindFirstChild("Vehicles")
     if not vehiclesFolder then return end
 
     for _, car in ipairs(vehiclesFolder:GetChildren()) do
         if not appliedCars[car] then
-            -- Check seats inside the vehicle
             for _, desc in ipairs(car:GetDescendants()) do
                 if desc:IsA("VehicleSeat") or desc:IsA("Seat") then
                     local occupant = desc.Occupant
@@ -261,4 +244,4 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-print("Script ready — auto-updating RoleplayInfo, scanning all 'COLOR' parts, and detecting script users.")
+print("Script ready — automatically using player username, updating RP info, and scanning vehicles.")
