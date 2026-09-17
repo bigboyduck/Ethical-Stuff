@@ -8,16 +8,16 @@ local player = Players.LocalPlayer
 local appliedCars = {} -- remembers which cars already have the effect
 
 --------------------------------------------------------------------------------
--- 1. SET ROLEPLAY INFO AUTOMATICALLY ON EXECUTION (USES PLAYER'S ACTUAL NAME)
+-- 1. SET ROLEPLAY INFO AUTOMATICALLY ON EXECUTION
 --------------------------------------------------------------------------------
 local roleplayArgs = {
     {
         BackgroundStyle = "Cityline",
-        HairColor = "Grey",
+        HairColor = "Brown",
         EyeColor = "Green",
         HeightFeet = 5,
         Age = "Kid",
-        Name = player.Name, -- Dynamically fetches their actual Roblox Username
+        Name = player.Name,
         Weight = 187,
         HeightInches = 2,
         License = "Active",
@@ -29,7 +29,7 @@ task.spawn(function()
     local changeRPInfoRemote = ReplicatedStorage:WaitForChild("FE", 10):WaitForChild("ChangeRoleplayInfo", 10)
     if changeRPInfoRemote then
         changeRPInfoRemote:InvokeServer(unpack(roleplayArgs))
-        print("✅ Roleplay info updated for " .. player.Name .. " (Grey Hair & Kid Age).")
+        print("✅ Roleplay info updated for " .. player.Name .. " (Age: Kid, Weight: 187).")
     else
         warn("❌ Could not find ChangeRoleplayInfo RemoteFunction.")
     end
@@ -166,7 +166,6 @@ local function applyToCar(car)
         if children[8] then addRainbow(children[8]) end
         if children[26] then addRainbow(children[26]) end
 
-        -- Scans all body descendants and turns parts named "COLOR" rainbow
         for _, child in ipairs(body:GetDescendants()) do
             if child.Name == "COLOR" and child:IsA("BasePart") then
                 addRainbow(child)
@@ -186,7 +185,7 @@ local function applyToCar(car)
 end
 
 --------------------------------------------------------------------------------
--- 3. DETECTION SYSTEM FOR SCRIPT USERS
+-- 3. DETECTION SYSTEM FOR SCRIPT USERS (AGE = KID & WEIGHT = 187)
 --------------------------------------------------------------------------------
 local function isScriptUser(targetPlayer)
     if not targetPlayer then return false end
@@ -206,13 +205,13 @@ local function isScriptUser(targetPlayer)
 
     local rpInfo = targetPlayer:FindFirstChild("RoleplayInfo") or (targetPlayer.Character and targetPlayer.Character:FindFirstChild("RoleplayInfo"))
     if rpInfo then
-        local hair = getValue(rpInfo, "HairColor")
         local age = getValue(rpInfo, "Age")
+        local weight = getValue(rpInfo, "Weight")
 
-        if hair and age then
-            local isGrey = (hair == "grey" or hair == "gray")
+        if age and weight then
             local isKid = (age == "kid")
-            if isGrey and isKid then
+            local is187 = (weight == "187")
+            if isKid and is187 then
                 return true
             end
         end
@@ -221,7 +220,7 @@ local function isScriptUser(targetPlayer)
     return false
 end
 
--- Detects seats and updates cars for anyone running the Grey/Kid script
+-- Detects seats and updates cars for anyone running the Age: Kid + Weight: 187 script
 RunService.Heartbeat:Connect(function()
     local vehiclesFolder = workspace:FindFirstChild("Vehicles")
     if not vehiclesFolder then return end
@@ -244,4 +243,4 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-print("Script ready — automatically using player username, updating RP info, and scanning vehicles.")
+print("Script ready — detecting script users by Age: Kid and Weight: 187.")
