@@ -78,6 +78,26 @@ local function findMyTycoon()
 end
 
 -- // Helper Functions
+local function parseNumberFromText(text)
+    if not text then return 0 end
+    
+    -- Handle suffixes like K, M, B, T
+    local raw = string.gsub(text, "[,%$%s]", "") -- Remove commas, $, and spaces
+    local num, suffix = string.match(raw, "^([%d%.]+)([kKmMbBtT]?)")
+    num = tonumber(num) or 0
+
+    if suffix then
+        suffix = string.upper(suffix)
+        if suffix == "K" then num = num * 1e3
+        elseif suffix == "M" then num = num * 1e6
+        elseif suffix == "B" then num = num * 1e9
+        elseif suffix == "T" then num = num * 1e12
+        end
+    end
+
+    return num
+end
+
 local function fireTouchInterest(touchInterest)
     if not touchInterest or not firetouchinterest then return end
     local char = player.Character
@@ -237,7 +257,7 @@ local function startAutoLoops()
         end
     end)
 
-    -- Auto Open Chests (with 5s cooldown)
+    -- Auto Open Chests (with money check and 5s cooldown)
     task.spawn(function()
         while Config.Running do
             if Toggles.OpenChests then
@@ -257,10 +277,21 @@ local function startAutoLoops()
 
                         local pg = player:FindFirstChild("PlayerGui")
                         local sg = pg and pg:FindFirstChild("ScreenGui")
+
+                        -- Exact paths specified for money and chest cost
+                        local moneyFrame = sg and sg:FindFirstChild("MoneyFrame")
+                        local moneyObj = moneyFrame and moneyFrame:FindFirstChild("Money")
+                        local playerMoneyLabel = moneyObj and moneyObj:FindFirstChild("AmountText")
+
                         local cf = sg and sg:FindFirstChild("ChestFrame")
                         local infoFrame = cf and cf:FindFirstChild("InfoFrame")
                         local chestInfo = infoFrame and infoFrame:FindFirstChild("ChestInfo")
                         local nameText = chestInfo and chestInfo:FindFirstChild("NameText")
+
+                        local priceFrame = cf and cf:FindFirstChild("PriceFrame")
+                        local frame = priceFrame and priceFrame:FindFirstChild("Frame")
+                        local costAmountObj = frame and frame:FindFirstChild("CostAmount")
+                        local chestCostLabel = costAmountObj and costAmountObj:FindFirstChild("AmountText")
 
                         local btnFrame = cf and cf:FindFirstChild("ButtonFrame")
                         local unlock = btnFrame and btnFrame:FindFirstChild("Unlock")
@@ -272,14 +303,22 @@ local function startAutoLoops()
                         local discardBtn = discard and discard:FindFirstChild("Button")
                         discardBtn = discardBtn and discardBtn:FindFirstChild("TextButton")
 
-                        -- Check if current chest name is toggled in multi-selection
-                        if nameText and Config.SelectedChests[nameText.Text] then
+                        -- Parse player cash balance & chest cost
+                        local currentMoney = parseNumberFromText(playerMoneyLabel and playerMoneyLabel.Text)
+                        local chestCost = parseNumberFromText(chestCostLabel and chestCostLabel.Text)
+
+                        -- Selection & Affordability Check
+                        local isSelectedChest = nameText and Config.SelectedChests[nameText.Text]
+                        local hasEnoughMoney = currentMoney >= chestCost
+
+                        if isSelectedChest and hasEnoughMoney then
                             fireTextButton(buyBtn)
                         else
+                            -- Discard if not selected or cannot afford
                             fireTextButton(discardBtn)
                         end
 
-                        -- Enforce 5-second cooldown before opening/processing the next chest
+                        -- Enforce 5-second cooldown before next chest
                         task.wait(5)
                     end
                 end
