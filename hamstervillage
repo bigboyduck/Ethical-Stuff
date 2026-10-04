@@ -378,6 +378,8 @@ local function startAutoLoops()
                                 fireTouchInterest(ti)
                             end
                         end
+
+                        -- Allow UI to pop up properly
                         task.wait(0.2)
 
                         local pg = player:FindFirstChild("PlayerGui")
@@ -419,7 +421,8 @@ local function startAutoLoops()
                             fireTextButton(discardBtn)
                         end
 
-                        local delayTime = getCalculatedDelay(Config.ChestRatePerHour, 0.2)
+                        -- Wait for execution delay or minimum required delay (0.3s) for UI response
+                        local delayTime = math.max(0.3, getCalculatedDelay(Config.ChestRatePerHour, 0.3))
                         task.wait(delayTime)
                     end
                 end
