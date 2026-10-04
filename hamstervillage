@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 
@@ -25,7 +26,13 @@ local Config = {
     UIHidden = false,
     Running = true,
     DebugDrops = false,
+    EnableRateLimits = true, -- Toggle to turn hourly rate limits on/off
     SelectedChests = {}, -- Stores multiple selected chest names {[Name] = true}
+    
+    -- Hourly Rates (Times per Hour, 0 = Max Speed)
+    HamsterRatePerHour = 10,
+    SeedUpgradeRatePerHour = 10,
+    ChestRatePerHour = 10,
 }
 
 -- // Toggle states
@@ -37,7 +44,76 @@ local Toggles = {
     CollectMoney = false,
     CollectAllDrops = false,
     OpenChests = false,
+    SellingSeedUpgrade = false,
 }
+
+-- // Config Persistence (executor file save)
+local CONFIG_FILE = "AutoTycoon_Config.json"
+
+local function getExecutorIO()
+    local write = writefile or write_file
+    local read = readfile or read_file
+    if write and read then
+        return write, read
+    end
+    return nil, nil
+end
+
+local function saveConfig()
+    local write = getExecutorIO()
+    if not write then return end
+
+    local data = {
+        Config = {
+            MinMultiplier = Config.MinMultiplier,
+            EnableRateLimits = Config.EnableRateLimits,
+            HamsterRatePerHour = Config.HamsterRatePerHour,
+            SeedUpgradeRatePerHour = Config.SeedUpgradeRatePerHour,
+            ChestRatePerHour = Config.ChestRatePerHour,
+            SelectedChests = Config.SelectedChests,
+        },
+        Toggles = Toggles,
+    }
+
+    pcall(function()
+        write(CONFIG_FILE, HttpService:JSONEncode(data))
+    end)
+end
+
+local function loadConfig()
+    local _, read = getExecutorIO()
+    if not read then return end
+
+    local ok, contents = pcall(function()
+        return read(CONFIG_FILE)
+    end)
+    if not ok or not contents then return end
+
+    local decoded
+    local ok2 = pcall(function()
+        decoded = HttpService:JSONDecode(contents)
+    end)
+    if not ok2 or type(decoded) ~= "table" then return end
+
+    if type(decoded.Config) == "table" then
+        for k, v in pairs(decoded.Config) do
+            if Config[k] ~= nil then
+                Config[k] = v
+            end
+        end
+        if type(Config.SelectedChests) ~= "table" then
+            Config.SelectedChests = {}
+        end
+    end
+
+    if type(decoded.Toggles) == "table" then
+        for k, v in pairs(decoded.Toggles) do
+            if Toggles[k] ~= nil then
+                Toggles[k] = v and true or false
+            end
+        end
+    end
+end
 
 -- // Find Tycoon
 local myTycoon = nil
@@ -81,8 +157,7 @@ end
 local function parseNumberFromText(text)
     if not text then return 0 end
     
-    -- Handle suffixes like K, M, B, T
-    local raw = string.gsub(text, "[,%$%s]", "") -- Remove commas, $, and spaces
+    local raw = string.gsub(text, "[,%$%s]", "")
     local num, suffix = string.match(raw, "^([%d%.]+)([kKmMbBtT]?)")
     num = tonumber(num) or 0
 
@@ -155,6 +230,13 @@ local function fireTextButton(btn)
     end
 end
 
+local function getCalculatedDelay(ratePerHour, defaultFast)
+    if not Config.EnableRateLimits then
+        return defaultFast or 0.1
+    end
+    return (ratePerHour > 0) and (3600 / ratePerHour) or (defaultFast or 0.1)
+end
+
 -- // Auto Loops
 local function startAutoLoops()
     -- Auto Deposit
@@ -205,6 +287,25 @@ local function startAutoLoops()
         end
     end)
 
+    -- Auto Selling Seed Upgrade
+    task.spawn(function()
+        while Config.Running do
+            if Toggles.SellingSeedUpgrade then
+                if myTycoon and myTycoon.Parent then
+                    local ti = getTouchInterest(myTycoon, "Buttons", "Upgrade", "Head", "TouchInterest")
+                    fireTouchInterest(ti)
+                else
+                    myTycoon = findMyTycoon()
+                end
+                
+                local delayTime = getCalculatedDelay(Config.SeedUpgradeRatePerHour, 0.1)
+                task.wait(delayTime)
+            else
+                task.wait(0.5)
+            end
+        end
+    end)
+
     -- Auto Buy Hamsters
     task.spawn(function()
         while Config.Running do
@@ -215,8 +316,12 @@ local function startAutoLoops()
                 else
                     myTycoon = findMyTycoon()
                 end
+                
+                local delayTime = getCalculatedDelay(Config.HamsterRatePerHour, 0.1)
+                task.wait(delayTime)
+            else
+                task.wait(0.5)
             end
-            task.wait(0.1)
         end
     end)
 
@@ -257,7 +362,7 @@ local function startAutoLoops()
         end
     end)
 
-    -- Auto Open Chests (with money check and 5s cooldown)
+    -- Auto Open Chests / Crates
     task.spawn(function()
         while Config.Running do
             if Toggles.OpenChests then
@@ -278,7 +383,6 @@ local function startAutoLoops()
                         local pg = player:FindFirstChild("PlayerGui")
                         local sg = pg and pg:FindFirstChild("ScreenGui")
 
-                        -- Exact paths specified for money and chest cost
                         local moneyFrame = sg and sg:FindFirstChild("MoneyFrame")
                         local moneyObj = moneyFrame and moneyFrame:FindFirstChild("Money")
                         local playerMoneyLabel = moneyObj and moneyObj:FindFirstChild("AmountText")
@@ -303,33 +407,30 @@ local function startAutoLoops()
                         local discardBtn = discard and discard:FindFirstChild("Button")
                         discardBtn = discardBtn and discardBtn:FindFirstChild("TextButton")
 
-                        -- Parse player cash balance & chest cost
                         local currentMoney = parseNumberFromText(playerMoneyLabel and playerMoneyLabel.Text)
                         local chestCost = parseNumberFromText(chestCostLabel and chestCostLabel.Text)
 
-                        -- Selection & Affordability Check
                         local isSelectedChest = nameText and Config.SelectedChests[nameText.Text]
                         local hasEnoughMoney = currentMoney >= chestCost
 
                         if isSelectedChest and hasEnoughMoney then
                             fireTextButton(buyBtn)
                         else
-                            -- Discard if not selected or cannot afford
                             fireTextButton(discardBtn)
                         end
 
-                        -- Enforce 5-second cooldown before next chest
-                        task.wait(5)
+                        local delayTime = getCalculatedDelay(Config.ChestRatePerHour, 0.2)
+                        task.wait(delayTime)
                     end
                 end
             end
-            task.wait(0.2)
+            task.wait(0.5)
         end
     end)
 end
 
 -- // Modern UI Construction
-local function createToggleRow(parent, labelText, toggleKey)
+local function createToggleRow(parent, labelText, getValue, setValue)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(1, 0, 0, 36)
     container.BackgroundColor3 = Color3.fromRGB(25, 27, 35)
@@ -379,16 +480,69 @@ local function createToggleRow(parent, labelText, toggleKey)
     button.Text = ""
     button.Parent = container
 
-    button.MouseButton1Click:Connect(function()
-        Toggles[toggleKey] = not Toggles[toggleKey]
-        local state = Toggles[toggleKey]
+    local initialState = getValue()
+    switchBg.BackgroundColor3 = initialState and Color3.fromRGB(88, 101, 242) or Color3.fromRGB(45, 48, 60)
+    knob.Position = initialState and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+    knob.BackgroundColor3 = initialState and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 185, 200)
 
-        local targetBg = state and Color3.fromRGB(88, 101, 242) or Color3.fromRGB(45, 48, 60)
-        local targetKnobPos = state and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
-        local targetKnobColor = state and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 185, 200)
+    button.MouseButton1Click:Connect(function()
+        local newState = not getValue()
+        setValue(newState)
+        saveConfig()
+
+        local targetBg = newState and Color3.fromRGB(88, 101, 242) or Color3.fromRGB(45, 48, 60)
+        local targetKnobPos = newState and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+        local targetKnobColor = newState and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 185, 200)
 
         TweenService:Create(switchBg, TweenInfo.new(0.2), {BackgroundColor3 = targetBg}):Play()
         TweenService:Create(knob, TweenInfo.new(0.2), {Position = targetKnobPos, BackgroundColor3 = targetKnobColor}):Play()
+    end)
+end
+
+local function createInputRow(parent, labelText, configKey)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 42)
+    card.BackgroundColor3 = Color3.fromRGB(25, 27, 35)
+    card.BorderSizePixel = 0
+    card.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = card
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.65, 0, 1, 0)
+    label.Position = UDim2.new(0, 12, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextColor3 = Color3.fromRGB(220, 225, 235)
+    label.Font = Enum.Font.GothamMedium
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = card
+
+    local input = Instance.new("TextBox")
+    input.Size = UDim2.new(0, 65, 0, 26)
+    input.Position = UDim2.new(1, -75, 0.5, -13)
+    input.BackgroundColor3 = Color3.fromRGB(35, 38, 50)
+    input.TextColor3 = Color3.fromRGB(255, 255, 255)
+    input.Text = tostring(Config[configKey])
+    input.Font = Enum.Font.GothamBold
+    input.TextSize = 12
+    input.Parent = card
+
+    local inputCorner = Instance.new("UICorner")
+    inputCorner.CornerRadius = UDim.new(0, 6)
+    inputCorner.Parent = input
+
+    input.FocusLost:Connect(function()
+        local num = tonumber(input.Text)
+        if num and num >= 0 then
+            Config[configKey] = num
+            saveConfig()
+        else
+            input.Text = tostring(Config[configKey])
+        end
     end)
 end
 
@@ -404,7 +558,7 @@ local function buildUI()
     mainFrame.BackgroundColor3 = Color3.fromRGB(18, 19, 26)
     mainFrame.BorderSizePixel = 0
     mainFrame.ClipsDescendants = true
-    mainFrame.Parent = gui
+    mainFrame.Parent = mainFrame.Parent and gui or gui
 
     local mainCorner = Instance.new("UICorner")
     mainCorner.CornerRadius = UDim.new(0, 12)
@@ -478,63 +632,54 @@ local function buildUI()
     padding.PaddingBottom = UDim.new(0, 12)
     padding.Parent = scroll
 
-    -- Multiplier Setting Input
-    local multCard = Instance.new("Frame")
-    multCard.Size = UDim2.new(1, 0, 0, 42)
-    multCard.BackgroundColor3 = Color3.fromRGB(25, 27, 35)
-    multCard.BorderSizePixel = 0
-    multCard.Parent = scroll
+    -- Settings / Rates Header
+    local ratesHeader = Instance.new("TextLabel")
+    ratesHeader.Size = UDim2.new(1, 0, 0, 18)
+    ratesHeader.BackgroundTransparency = 1
+    ratesHeader.Text = "RATE LIMITS & MULTIPLIER"
+    ratesHeader.TextColor3 = Color3.fromRGB(120, 125, 140)
+    ratesHeader.Font = Enum.Font.GothamBold
+    ratesHeader.TextSize = 10
+    ratesHeader.TextXAlignment = Enum.TextXAlignment.Left
+    ratesHeader.Parent = scroll
 
-    local multCorner = Instance.new("UICorner")
-    multCorner.CornerRadius = UDim.new(0, 8)
-    multCorner.Parent = multCard
-
-    local multLabel = Instance.new("TextLabel")
-    multLabel.Size = UDim2.new(0.6, 0, 1, 0)
-    multLabel.Position = UDim2.new(0, 12, 0, 0)
-    multLabel.BackgroundTransparency = 1
-    multLabel.Text = "Min Multiplier"
-    multLabel.TextColor3 = Color3.fromRGB(220, 225, 235)
-    multLabel.Font = Enum.Font.GothamMedium
-    multLabel.TextSize = 13
-    multLabel.TextXAlignment = Enum.TextXAlignment.Left
-    multLabel.Parent = multCard
-
-    local multInput = Instance.new("TextBox")
-    multInput.Size = UDim2.new(0, 65, 0, 26)
-    multInput.Position = UDim2.new(1, -75, 0.5, -13)
-    multInput.BackgroundColor3 = Color3.fromRGB(35, 38, 50)
-    multInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-    multInput.Text = tostring(Config.MinMultiplier)
-    multInput.Font = Enum.Font.GothamBold
-    multInput.TextSize = 12
-    multInput.Parent = multCard
-
-    local inputCorner = Instance.new("UICorner")
-    inputCorner.CornerRadius = UDim.new(0, 6)
-    inputCorner.Parent = multInput
-
-    multInput.FocusLost:Connect(function()
-        local num = tonumber(multInput.Text)
-        if num then
-            Config.MinMultiplier = num
-        else
-            multInput.Text = tostring(Config.MinMultiplier)
-        end
+    -- Enable/Disable Rate Limits Master Toggle
+    createToggleRow(scroll, "Enable Rate Limits", function()
+        return Config.EnableRateLimits
+    end, function(val)
+        Config.EnableRateLimits = val
     end)
 
+    -- Input Fields
+    createInputRow(scroll, "Min Multiplier", "MinMultiplier")
+    createInputRow(scroll, "Hamster Buys / Hr", "HamsterRatePerHour")
+    createInputRow(scroll, "Seed Upgrades / Hr", "SeedUpgradeRatePerHour")
+    createInputRow(scroll, "Crate Opens / Hr", "ChestRatePerHour")
+
+    -- Toggles Header
+    local togglesHeader = Instance.new("TextLabel")
+    togglesHeader.Size = UDim2.new(1, 0, 0, 18)
+    togglesHeader.BackgroundTransparency = 1
+    togglesHeader.Text = "AUTOMATION TOGGLES"
+    togglesHeader.TextColor3 = Color3.fromRGB(120, 125, 140)
+    togglesHeader.Font = Enum.Font.GothamBold
+    togglesHeader.TextSize = 10
+    togglesHeader.TextXAlignment = Enum.TextXAlignment.Left
+    togglesHeader.Parent = scroll
+
     -- Toggle Entries
-    createToggleRow(scroll, "Auto Deposit", "Deposit")
-    createToggleRow(scroll, "Auto Merge", "Merge")
-    createToggleRow(scroll, "Tier Upgrader", "TierUpgrader")
-    createToggleRow(scroll, "Buy Hamsters", "Hamster")
-    createToggleRow(scroll, "Collect Money", "CollectMoney")
-    createToggleRow(scroll, "Collect All Drops", "CollectAllDrops")
-    createToggleRow(scroll, "Auto Open Chests", "OpenChests")
+    createToggleRow(scroll, "Auto Deposit", function() return Toggles.Deposit end, function(v) Toggles.Deposit = v end)
+    createToggleRow(scroll, "Auto Merge", function() return Toggles.Merge end, function(v) Toggles.Merge = v end)
+    createToggleRow(scroll, "Tier Upgrader (Max Speed)", function() return Toggles.TierUpgrader end, function(v) Toggles.TierUpgrader = v end)
+    createToggleRow(scroll, "Selling Seed Upgrade", function() return Toggles.SellingSeedUpgrade end, function(v) Toggles.SellingSeedUpgrade = v end)
+    createToggleRow(scroll, "Buy Hamsters", function() return Toggles.Hamster end, function(v) Toggles.Hamster = v end)
+    createToggleRow(scroll, "Collect Money", function() return Toggles.CollectMoney end, function(v) Toggles.CollectMoney = v end)
+    createToggleRow(scroll, "Collect All Drops", function() return Toggles.CollectAllDrops end, function(v) Toggles.CollectAllDrops = v end)
+    createToggleRow(scroll, "Auto Open Chests", function() return Toggles.OpenChests end, function(v) Toggles.OpenChests = v end)
 
     -- Chest Selector Section
     local chestHeader = Instance.new("TextLabel")
-    chestHeader.Size = UDim2.new(1, 0, 0, 20)
+    chestHeader.Size = UDim2.new(1, 0, 0, 18)
     chestHeader.BackgroundTransparency = 1
     chestHeader.Text = "CHEST TARGETS (MULTI-SELECT)"
     chestHeader.TextColor3 = Color3.fromRGB(120, 125, 140)
@@ -567,6 +712,11 @@ local function buildUI()
         btnCorner.CornerRadius = UDim.new(0, 6)
         btnCorner.Parent = btn
 
+        if Config.SelectedChests[name] then
+            btn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end
+
         btn.MouseButton1Click:Connect(function()
             if Config.SelectedChests[name] then
                 Config.SelectedChests[name] = nil
@@ -575,6 +725,7 @@ local function buildUI()
                 Config.SelectedChests[name] = true
                 TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(88, 101, 242), TextColor3 = Color3.fromRGB(255, 255, 255)}):Play()
             end
+            saveConfig()
         end)
     end
 
@@ -601,6 +752,7 @@ local function buildUI()
     uninjectCorner.Parent = uninjectBtn
 
     uninjectBtn.MouseButton1Click:Connect(function()
+        saveConfig()
         Config.Running = false
         gui:Destroy()
     end)
@@ -609,6 +761,8 @@ local function buildUI()
 end
 
 -- // Init
+loadConfig()
+
 myTycoon = findMyTycoon()
 
 local gui = buildUI()
@@ -618,6 +772,12 @@ UserInputService.InputBegan:Connect(function(input, gpe)
     if input.KeyCode == Enum.KeyCode.LeftControl then
         Config.UIHidden = not Config.UIHidden
         gui.Enabled = not Config.UIHidden
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    if p == player then
+        saveConfig()
     end
 end)
 
