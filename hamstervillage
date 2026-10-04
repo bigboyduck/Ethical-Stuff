@@ -26,13 +26,7 @@ local Config = {
     UIHidden = false,
     Running = true,
     DebugDrops = false,
-    EnableRateLimits = true, -- Toggle to turn hourly rate limits on/off
     SelectedChests = {}, -- Stores multiple selected chest names {[Name] = true}
-    
-    -- Hourly Rates (Times per Hour, 0 = Max Speed)
-    HamsterRatePerHour = 10,
-    SeedUpgradeRatePerHour = 10,
-    ChestRatePerHour = 10,
 }
 
 -- // Toggle states
@@ -66,10 +60,6 @@ local function saveConfig()
     local data = {
         Config = {
             MinMultiplier = Config.MinMultiplier,
-            EnableRateLimits = Config.EnableRateLimits,
-            HamsterRatePerHour = Config.HamsterRatePerHour,
-            SeedUpgradeRatePerHour = Config.SeedUpgradeRatePerHour,
-            ChestRatePerHour = Config.ChestRatePerHour,
             SelectedChests = Config.SelectedChests,
         },
         Toggles = Toggles,
@@ -230,13 +220,6 @@ local function fireTextButton(btn)
     end
 end
 
-local function getCalculatedDelay(ratePerHour, defaultFast)
-    if not Config.EnableRateLimits then
-        return defaultFast or 0.1
-    end
-    return (ratePerHour > 0) and (3600 / ratePerHour) or (defaultFast or 0.1)
-end
-
 -- // Auto Loops
 local function startAutoLoops()
     -- Auto Deposit
@@ -297,12 +280,8 @@ local function startAutoLoops()
                 else
                     myTycoon = findMyTycoon()
                 end
-                
-                local delayTime = getCalculatedDelay(Config.SeedUpgradeRatePerHour, 0.1)
-                task.wait(delayTime)
-            else
-                task.wait(0.5)
             end
+            task.wait(0.1)
         end
     end)
 
@@ -316,12 +295,8 @@ local function startAutoLoops()
                 else
                     myTycoon = findMyTycoon()
                 end
-                
-                local delayTime = getCalculatedDelay(Config.HamsterRatePerHour, 0.1)
-                task.wait(delayTime)
-            else
-                task.wait(0.5)
             end
+            task.wait(0.1)
         end
     end)
 
@@ -379,7 +354,7 @@ local function startAutoLoops()
                             end
                         end
 
-                        -- Allow UI to pop up properly
+                        -- Wait briefly for chest UI to initialize
                         task.wait(0.2)
 
                         local pg = player:FindFirstChild("PlayerGui")
@@ -421,13 +396,12 @@ local function startAutoLoops()
                             fireTextButton(discardBtn)
                         end
 
-                        -- Wait for execution delay or minimum required delay (0.3s) for UI response
-                        local delayTime = math.max(0.3, getCalculatedDelay(Config.ChestRatePerHour, 0.3))
-                        task.wait(delayTime)
+                        -- Necessary UI animation buffer so it doesn't double-interact
+                        task.wait(0.3)
                     end
                 end
             end
-            task.wait(0.5)
+            task.wait(0.2)
         end
     end)
 end
@@ -556,12 +530,12 @@ local function buildUI()
     gui.Parent = player:WaitForChild("PlayerGui")
 
     local mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(0, 320, 0, 480)
-    mainFrame.Position = UDim2.new(0, 30, 0.5, -240)
+    mainFrame.Size = UDim2.new(0, 320, 0, 450)
+    mainFrame.Position = UDim2.new(0, 30, 0.5, -225)
     mainFrame.BackgroundColor3 = Color3.fromRGB(18, 19, 26)
     mainFrame.BorderSizePixel = 0
     mainFrame.ClipsDescendants = true
-    mainFrame.Parent = mainFrame.Parent and gui or gui
+    mainFrame.Parent = gui
 
     local mainCorner = Instance.new("UICorner")
     mainCorner.CornerRadius = UDim.new(0, 12)
@@ -635,29 +609,19 @@ local function buildUI()
     padding.PaddingBottom = UDim.new(0, 12)
     padding.Parent = scroll
 
-    -- Settings / Rates Header
+    -- Settings Header
     local ratesHeader = Instance.new("TextLabel")
     ratesHeader.Size = UDim2.new(1, 0, 0, 18)
     ratesHeader.BackgroundTransparency = 1
-    ratesHeader.Text = "RATE LIMITS & MULTIPLIER"
+    ratesHeader.Text = "SETTINGS"
     ratesHeader.TextColor3 = Color3.fromRGB(120, 125, 140)
     ratesHeader.Font = Enum.Font.GothamBold
     ratesHeader.TextSize = 10
     ratesHeader.TextXAlignment = Enum.TextXAlignment.Left
     ratesHeader.Parent = scroll
 
-    -- Enable/Disable Rate Limits Master Toggle
-    createToggleRow(scroll, "Enable Rate Limits", function()
-        return Config.EnableRateLimits
-    end, function(val)
-        Config.EnableRateLimits = val
-    end)
-
     -- Input Fields
     createInputRow(scroll, "Min Multiplier", "MinMultiplier")
-    createInputRow(scroll, "Hamster Buys / Hr", "HamsterRatePerHour")
-    createInputRow(scroll, "Seed Upgrades / Hr", "SeedUpgradeRatePerHour")
-    createInputRow(scroll, "Crate Opens / Hr", "ChestRatePerHour")
 
     -- Toggles Header
     local togglesHeader = Instance.new("TextLabel")
@@ -673,7 +637,7 @@ local function buildUI()
     -- Toggle Entries
     createToggleRow(scroll, "Auto Deposit", function() return Toggles.Deposit end, function(v) Toggles.Deposit = v end)
     createToggleRow(scroll, "Auto Merge", function() return Toggles.Merge end, function(v) Toggles.Merge = v end)
-    createToggleRow(scroll, "Tier Upgrader (Max Speed)", function() return Toggles.TierUpgrader end, function(v) Toggles.TierUpgrader = v end)
+    createToggleRow(scroll, "Tier Upgrader", function() return Toggles.TierUpgrader end, function(v) Toggles.TierUpgrader = v end)
     createToggleRow(scroll, "Selling Seed Upgrade", function() return Toggles.SellingSeedUpgrade end, function(v) Toggles.SellingSeedUpgrade = v end)
     createToggleRow(scroll, "Buy Hamsters", function() return Toggles.Hamster end, function(v) Toggles.Hamster = v end)
     createToggleRow(scroll, "Collect Money", function() return Toggles.CollectMoney end, function(v) Toggles.CollectMoney = v end)
